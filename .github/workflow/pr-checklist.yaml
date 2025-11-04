@@ -1,1 +1,85 @@
-hello
+name: PR Checklist Generator
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'Platform_testing/ut/**'
+      - 'Platform_testing/gt/**'
+      - 'Platform_testing/qm/**'
+      - 'Platform_testing/fusa/**'
+
+jobs:
+  generate-checklists:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v39
+
+      - name: Process changes and create checklists
+        run: |
+          # Initialize variables to track which checklists are needed
+          need_ut=false
+          need_gt=false
+          need_qm=false
+          need_fusa=false
+          
+          # Check each changed file and set flags
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            if [[ $file == Platform_testing/ut/* ]]; then
+              need_ut=true
+            elif [[ $file == Platform_testing/gt/* ]]; then
+              need_gt=true
+            elif [[ $file == Platform_testing/qm/* ]]; then
+              need_qm=true
+            elif [[ $file == Platform_testing/fusa/* ]]; then
+              need_fusa=true
+            fi
+          done
+          
+          # Create comment content
+          comment_body="## PR Checklists\n\n"
+          
+          # Add relevant checklists
+          if [ "$need_ut" = true ]; then
+            comment_body+="### Unit Test Checklist\n"
+            comment_body+="$(cat .github/workflow/checklist/Ut_checklist.md)\n\n"
+          fi
+          
+          if [ "$need_gt" = true ]; then
+            comment_body+="### Integration Test Checklist\n"
+            comment_body+="$(cat .github/workflow/checklist/Gt_checklist.md)\n\n"
+          fi
+          
+          if [ "$need_qm" = true ]; then
+            comment_body+="### Quality Management Checklist\n"
+            comment_body+="$(cat .github/workflow/checklist/Qm_checklist.md)\n\n"
+          fi
+          
+          if [ "$need_fusa" = true ]; then
+            comment_body+="### Functional Safety Checklist\n"
+            comment_body+="$(cat .github/workflow/checklist/Fusa_checklist.md)\n\n"
+          fi
+          
+          # Save comment to file
+          echo "$comment_body" > pr_comment.txt
+
+      - name: Create PR Comment
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const comment_body = fs.readFileSync('pr_comment.txt', 'utf8');
+            const issue_number = context.issue.number;
+            
+            // Add comment to PR
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue_number,
+              body: comment_body
+            });
