@@ -9,6 +9,10 @@ on:
       - 'Platform_testing/qm/**'
       - 'Platform_testing/fusa/**'
 
+permissions:
+  pull-requests: write
+  contents: read
+
 jobs:
   generate-checklists:
     runs-on: ubuntu-latest
@@ -20,66 +24,79 @@ jobs:
         id: changed-files
         uses: tj-actions/changed-files@v39
 
-      - name: Process changes and create checklists
-        run: |
-          # Initialize variables to track which checklists are needed
-          need_ut=false
-          need_gt=false
-          need_qm=false
-          need_fusa=false
-          
-          # Check each changed file and set flags
-          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-            if [[ $file == Platform_testing/ut/* ]]; then
-              need_ut=true
-            elif [[ $file == Platform_testing/gt/* ]]; then
-              need_gt=true
-            elif [[ $file == Platform_testing/qm/* ]]; then
-              need_qm=true
-            elif [[ $file == Platform_testing/fusa/* ]]; then
-              need_fusa=true
-            fi
-          done
-          
-          # Create comment content
-          comment_body="## PR Checklists\n\n"
-          
-          # Add relevant checklists
-          if [ "$need_ut" = true ]; then
-            comment_body+="### Unit Test Checklist\n"
-            comment_body+="$(cat .github/workflow/checklist/ut_checklist.md)\n\n"
-          fi
-          
-          if [ "$need_gt" = true ]; then
-            comment_body+="### Integration Test Checklist\n"
-            comment_body+="$(cat .github/workflow/checklist/gt_checklist.md)\n\n"
-          fi
-          
-          if [ "$need_qm" = true ]; then
-            comment_body+="### Quality Management Checklist\n"
-            comment_body+="$(cat .github/workflow/checklist/qm_checklist.md)\n\n"
-          fi
-          
-          if [ "$need_fusa" = true ]; then
-            comment_body+="### Functional Safety Checklist\n"
-            comment_body+="$(cat .github/workflow/checklist/fusa_checklist.md)\n\n"
-          fi
-          
-          # Save comment to file
-          echo "$comment_body" > pr_comment.txt
-
-      - name: Create PR Comment
+      - name: Update PR description with checklists
         uses: actions/github-script@v6
+        env:
+          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         with:
           script: |
             const fs = require('fs');
-            const comment_body = fs.readFileSync('pr_comment.txt', 'utf8');
-            const issue_number = context.issue.number;
-            
-            // Add comment to PR
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue_number,
-              body: comment_body
-            });
+            const path = require('path');
+
+            const changedRaw = process.env.CHANGED_FILES || '';
+            const changed = changedRaw.split(/\r?\n/).filter(Boolean);
+
+            const need = { ut: false, gt: false, qm: false, fusa: false };
+            for (const f of changed) {
+              if (f.startsWith('Platform_testing/ut/')) need.ut = true;
+              else if (f.startsWith('Platform_testing/gt/')) need.gt = true;
+              else if (f.startsWith('Platform_testing/qm/')) need.qm = true;
+              else if (f.startsWith('Platform_testing/fusa/')) need.fusa = true;
+            }
+
+            if (!need.ut && !need.gt && !need.qm && !need.fusa) {
+              console.log('No relevant Platform_testing changes detected. Exiting.');
+              return;
+            }
+
+            const checklistDir = '.github/workflow/checklist';
+            let filesInDir = [];
+            if (fs.existsSync(checklistDir)) {
+              filesInDir = fs.readdirSync(checklistDir);
+            } else {
+              console.log(`Checklist folder not found at ${checklistDir}`);
+            }
+
+            const lowerMap = {};
+            for (const fn of filesInDir) {
+              lowerMap[fn.toLowerCase()] = fn;
+            }
+
+            const want = [];
+            if (need.ut) want.push('ut_checklist.md');
+            if (need.gt) want.push('gt_checklist.md');
+            if (need.qm) want.push('qm_checklist.md');
+            if (need.fusa) want.push('fusa_checklist.md');
+
+            const parts = [];
+            for (const w of want) {
+              const found = lowerMap[w];
+              if (found) {
+                try {
+                  const content = fs.readFileSync(path.join(checklistDir, found), 'utf8');
+                  parts.push(`### ${w.replace('_checklist.md','').toUpperCase()} Checklist\n\n` + content);
+                } catch (err) {
+                  console.log(`Failed reading ${found}: ${err}`);
+                }
+              } else {
+                console.log(`Checklist file not found for ${w} (case-insensitive search)`);
+              }
+            }
+
+            if (parts.length === 0) {
+              console.log('No checklist content to add.');
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.issue.number;
+
+            const pr = await github.rest.pulls.get({ owner, repo, pull_number });
+            const currentBody = pr.data.body || '';
+
+            const baseBody = currentBody.split('\n## PR Checklists\n')[0].trim();
+            const updatedBody = (baseBody ? baseBody + '\n\n' : '') + '## PR Checklists\n\n' + parts.join('\n\n');
+
+            await github.rest.pulls.update({ owner, repo, pull_number, body: updatedBody });
+            console.log('PR description updated with checklists.');
