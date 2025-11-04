@@ -50,7 +50,7 @@ jobs:
             }
 
             // Use the recommended plural workflows folder only
-            const checklistDir = '.github/workflows/checklist';
+            const checklistDir = '.github/workflows/checklists';
             let filesInDir = [];
             if (fs.existsSync(checklistDir)) {
               filesInDir = fs.readdirSync(checklistDir);
