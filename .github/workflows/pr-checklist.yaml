@@ -49,7 +49,7 @@ jobs:
               return;
             }
 
-            const checklistDir = '.github/workflow/checklist';
+            const checklistDir = '.github/workflows/checklist';
             let filesInDir = [];
             if (fs.existsSync(checklistDir)) {
               filesInDir = fs.readdirSync(checklistDir);
