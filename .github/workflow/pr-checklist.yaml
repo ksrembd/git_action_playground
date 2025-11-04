@@ -47,22 +47,22 @@ jobs:
           # Add relevant checklists
           if [ "$need_ut" = true ]; then
             comment_body+="### Unit Test Checklist\n"
-            comment_body+="$(cat .github/workflow/checklist/Ut_checklist.md)\n\n"
+            comment_body+="$(cat .github/workflow/checklist/ut_checklist.md)\n\n"
           fi
           
           if [ "$need_gt" = true ]; then
             comment_body+="### Integration Test Checklist\n"
-            comment_body+="$(cat .github/workflow/checklist/Gt_checklist.md)\n\n"
+            comment_body+="$(cat .github/workflow/checklist/gt_checklist.md)\n\n"
           fi
           
           if [ "$need_qm" = true ]; then
             comment_body+="### Quality Management Checklist\n"
-            comment_body+="$(cat .github/workflow/checklist/Qm_checklist.md)\n\n"
+            comment_body+="$(cat .github/workflow/checklist/qm_checklist.md)\n\n"
           fi
           
           if [ "$need_fusa" = true ]; then
             comment_body+="### Functional Safety Checklist\n"
-            comment_body+="$(cat .github/workflow/checklist/Fusa_checklist.md)\n\n"
+            comment_body+="$(cat .github/workflow/checklist/fusa_checklist.md)\n\n"
           fi
           
           # Save comment to file
