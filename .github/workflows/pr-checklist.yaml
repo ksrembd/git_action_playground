@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  pr-checklist-external-testing:
-    name: PR Checklist Generator external testing
+  pr-checklist-testing:
+    name: PR Checklist Generator for testing
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -23,24 +23,83 @@ jobs:
         id: changed-files
         uses: tj-actions/changed-files@v39
 
-      - name: Update PR description with external testing checklist
+      - name: Detect external/internal relevant changes
+        id: detect
+        run: |
+          changedRaw="${{ steps.changed-files.outputs.all_changed_files }}"
+          addedRaw="${{ steps.changed-files.outputs.added_files }}"
+
+          # Path variables (keep these near the top so they're easy to find)
+          external_path="ecu/xpad/xpad-shared/platform_tests/"
+          internal_path="platform/aas/test/"
+
+          # Regex variables for internal tests (do not hardcode in conditionals)
+          py_regex='^test_.*\.py$'
+          cpp_regex='_test\.cpp$'
+
+          has_external=false
+          has_internal=false
+
+          # Detect any change or new file under external path
+          if [[ -n "$changedRaw" ]]; then
+            while IFS= read -r f; do
+              if [[ "$f" == ${external_path}* ]]; then
+                has_external=true
+                break
+              fi
+            done <<< "$changedRaw"
+          fi
+          if [[ "$has_external" != true && -n "$addedRaw" ]]; then
+            while IFS= read -r f; do
+              if [[ "$f" == ${external_path}* ]]; then
+                has_external=true
+                break
+              fi
+            done <<< "$addedRaw"
+          fi
+
+          # Detect internal test file changes (changed or added) that match regex
+          if [[ -n "$changedRaw" ]]; then
+            while IFS= read -r f; do
+              if [[ "$f" == ${internal_path}* ]]; then
+                filename="${f##*/}"
+                if [[ "$filename" =~ $py_regex ]] || [[ "$filename" =~ $cpp_regex ]]; then
+                  has_internal=true
+                  break
+                fi
+              fi
+            done <<< "$changedRaw"
+          fi
+          if [[ "$has_internal" != true && -n "$addedRaw" ]]; then
+            while IFS= read -r f; do
+              if [[ "$f" == ${internal_path}* ]]; then
+                filename="${f##*/}"
+                if [[ "$filename" =~ $py_regex ]] || [[ "$filename" =~ $cpp_regex ]]; then
+                  has_internal=true
+                  break
+                fi
+              fi
+            done <<< "$addedRaw"
+          fi
+
+          echo "has-external=$has_external" >> $GITHUB_OUTPUT
+          echo "has-internal=$has_internal" >> $GITHUB_OUTPUT
+
+      - name: Update PR description with checklists
         uses: actions/github-script@v6
         env:
-          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+          HAS_EXTERNAL: ${{ steps.detect.outputs.has-external }}
+          HAS_INTERNAL: ${{ steps.detect.outputs.has-internal }}
         with:
           script: |
             const fs = require('fs');
             const path = require('path');
 
-            const changedRaw = process.env.CHANGED_FILES || '';
-            const changed = changedRaw.split(/\r?\n/).filter(Boolean);
+            const hasExternal = process.env.HAS_EXTERNAL === 'true';
+            const hasInternal = process.env.HAS_INTERNAL === 'true';
 
-            const hasExternalTestChanges = changed.some(f =>
-              f.startsWith('ecu/xpad/xpad-shared/platform_tests/')
-            );
-
-            if (!hasExternalTestChanges) {
-              console.log('No external testing changes detected. Skipping.');
+            if (!hasExternal && !hasInternal) {
+              console.log('No relevant testing changes detected. Exiting.');
               return;
             }
 
@@ -63,7 +122,9 @@ jobs:
               return;
             }
 
-            const parts = [`### External Testing Checklist\n\n` + checklistContent];
+            const parts = [];
+            if (hasExternal) parts.push('### External Testing Checklist\n\n' + checklistContent);
+            if (hasInternal) parts.push('### Internal Testing Checklist\n\n' + checklistContent);
 
             const owner = context.repo.owner;
             const repo = context.repo.repo;
@@ -76,95 +137,4 @@ jobs:
             const updatedBody = (baseBody ? baseBody + '\n\n' : '') + '## PR Checklists\n\n' + parts.join('\n\n');
 
             await github.rest.pulls.update({ owner, repo, pull_number, body: updatedBody });
-            console.log('PR description updated with external testing checklist.');
-
-  pr-checklist-internal-testing:
-    name: PR Checklist Generator internal testing
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@v39
-
-      - name: Update PR description with internal testing checklist
-        uses: actions/github-script@v6
-        env:
-          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-
-            const changedRaw = process.env.CHANGED_FILES || '';
-            const changed = changedRaw.split(/\r?\n/).filter(Boolean);
-
-            // Filter for internal testing changes: platform/aas/test files
-            const internalTestFiles = changed.filter(f =>
-              f.startsWith('platform/aas/test/')
-            );
-
-            if (internalTestFiles.length === 0) {
-              console.log('No internal testing changes detected. Skipping.');
-              return;
-            }
-
-            // Check if changes include test_*.py or *_test.cpp files
-            const pyTestRegex = /test_.*\.py$/i;
-            const cppTestRegex = /.*_test\.cpp$/i;
-            
-            const hasTestFiles = internalTestFiles.some(f => {
-              const filename = f.split('/').pop();
-              return pyTestRegex.test(filename) || cppTestRegex.test(filename);
-            });
-
-            if (!hasTestFiles) {
-              console.log('No Python test (test_*.py) or C++ test (*_test.cpp) files detected. Skipping.');
-              return;
-            }
-
-            console.log('Detected test files:');
-            internalTestFiles.forEach(f => {
-              const filename = f.split('/').pop();
-              if (pyTestRegex.test(filename)) {
-                console.log(`  - ${f} (Python test)`);
-              } else if (cppTestRegex.test(filename)) {
-                console.log(`  - ${f} (C++ test)`);
-              }
-            });
-
-            // Use the platform test dev checklist
-            const checklistPath = '.github/PULL_REQUEST_TEMPLATE/platform_test_dev_checklist.md';
-            let checklistContent = '';
-            if (fs.existsSync(checklistPath)) {
-              try {
-                checklistContent = fs.readFileSync(checklistPath, 'utf8');
-                console.log(`Using checklist: ${checklistPath}`);
-              } catch (err) {
-                console.log(`Failed reading ${checklistPath}: ${err}`);
-              }
-            } else {
-              console.log(`Checklist file not found at ${checklistPath}`);
-            }
-
-            if (!checklistContent) {
-              console.log('No checklist content to add.');
-              return;
-            }
-
-            const parts = [`### Internal Testing Checklist\n\n` + checklistContent];
-
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const pull_number = context.issue.number;
-
-            const pr = await github.rest.pulls.get({ owner, repo, pull_number });
-            const currentBody = pr.data.body || '';
-
-            const baseBody = currentBody.split('\n## PR Checklists\n')[0].trim();
-            const updatedBody = (baseBody ? baseBody + '\n\n' : '') + '## PR Checklists\n\n' + parts.join('\n\n');
-
-            await github.rest.pulls.update({ owner, repo, pull_number, body: updatedBody });
-            console.log('PR description updated with internal testing checklist.');
+            console.log('PR description updated with testing checklist(s).');
