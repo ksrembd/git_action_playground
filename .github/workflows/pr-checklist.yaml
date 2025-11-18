@@ -4,8 +4,8 @@ on:
   pull_request:
     types: [opened, synchronize]
     paths:
-      - 'ecu/xpad/xpad-shared/platform_tests/**'
-      - 'platform/aas/test/**'
+      - ecu/xpad/xpad-shared/platform_tests/**
+      - platform/aas/test/**
 
 permissions:
   pull-requests: write
@@ -134,7 +134,14 @@ jobs:
             const currentBody = pr.data.body || '';
 
             const baseBody = currentBody.split('\n## PR Checklists\n')[0].trim();
-            const updatedBody = (baseBody ? baseBody + '\n\n' : '') + '## PR Checklists\n\n' + parts.join('\n\n');
+            const header = '## PR Checklists\n\n';
+            const checklists = parts.join('\n\n');
+            let updatedBody = '';
+            if (baseBody) {
+              updatedBody = baseBody + '\n\n' + header + checklists;
+            } else {
+              updatedBody = header + checklists;
+            }
 
             await github.rest.pulls.update({ owner, repo, pull_number, body: updatedBody });
             console.log('PR description updated with testing checklist(s).');
